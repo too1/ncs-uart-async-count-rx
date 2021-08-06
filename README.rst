@@ -1,17 +1,12 @@
-.. _blinky-sample:
+.. _uart-count-rx:
 
-Blinky
-######
+UART_Count_RX
+#############
 
 Overview
 ********
 
-Blinky is a simple application which blinks an LED forever using the :ref:`GPIO
-API <gpio_api>`. The source code shows how to configure GPIO pins as outputs,
-then turn them on and off.
-
-See :ref:`pwm-blinky-sample` for a sample which uses the PWM API to blink an
-LED.
+This example shows how to use the PPI and a TIMER module to count the received UART RX bytes.
 
 .. _blinky-sample-requirements:
 
@@ -40,5 +35,3 @@ Build and flash Blinky as follows, changing ``reel_board`` for your board:
    :board: reel_board
    :goals: build flash
    :compact:
-
-After flashing, the LED starts to blink. Blinky does not print to the console.
