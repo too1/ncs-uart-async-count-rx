@@ -9,73 +9,79 @@
 #include <devicetree.h>
 #include <drivers/gpio.h>
 #include <drivers/uart.h>
+#include <string.h>
 
-/* 1000 msec = 1 sec */
-#define SLEEP_TIME_MS   1000
+#define UART_BUF_SIZE		16
+#define UART_RX_TIMEOUT_MS	100
 
-/* The devicetree node identifier for the "led0" alias. */
-#define LED0_NODE DT_ALIAS(led0)
-
-#if DT_NODE_HAS_STATUS(LED0_NODE, okay)
-#define LED0	DT_GPIO_LABEL(LED0_NODE, gpios)
-#define PIN	DT_GPIO_PIN(LED0_NODE, gpios)
-#define FLAGS	DT_GPIO_FLAGS(LED0_NODE, gpios)
-#else
-/* A build error here means your board isn't set up to blink an LED. */
-#error "Unsupported board: led0 devicetree alias is not defined"
-#define LED0	""
-#define PIN	0
-#define FLAGS	0
-#endif
+K_SEM_DEFINE(tx_done, 0, 1);
+K_SEM_DEFINE(rx_rdy, 0, 1);
+K_SEM_DEFINE(rx_disabled, 0, 1);
 
 static const struct device *dev_uart;
 
-static uint8_t uart_buf[1024];
+uint8_t uart_double_buffer[2][UART_BUF_SIZE];
+uint8_t *uart_buf_next = uart_double_buffer[1];
+uint8_t *read_ptr;
+uint32_t read_len;
 
-void uart_cb(const struct device *x, void *user_data)
+void uart_async_callback(const struct device *uart_dev,
+				struct uart_event *evt, void *user_data)
 {
-	uart_irq_update(x);
-	int data_length = 0;
+	switch (evt->type) {
+		case UART_TX_DONE:
+			k_sem_give(&tx_done);
+			break;
+		
+		case UART_RX_RDY:
+			read_ptr = evt->data.rx.buf + evt->data.rx.offset;
+			read_len = evt->data.rx.len;
+			k_sem_give(&rx_rdy);
+			break;
+		
+		case UART_RX_BUF_REQUEST:
+			uart_rx_buf_rsp(dev_uart, uart_buf_next, UART_BUF_SIZE);
+			break;
 
-	if (uart_irq_rx_ready(x)) {
-		data_length = uart_fifo_read(x, uart_buf, sizeof(uart_buf));
-		uart_buf[data_length] = 0;
+		case UART_RX_BUF_RELEASED:
+			uart_buf_next = evt->data.rx_buf.buf;
+			break;
+
+		case UART_RX_DISABLED:
+			k_sem_give(&rx_disabled);
+			break;
+		
+		default:
+			break;
 	}
-	printk("%s", uart_buf);
 }
 
 static void uart_init(void)
 {
 	dev_uart = device_get_binding("UART_0");
 	if (dev_uart == NULL) {
+		printk("Failed to get UART binding\n");
 		return;
 	}
 
-	uart_irq_callback_set(dev_uart, uart_cb);
-	uart_irq_rx_enable(dev_uart);
+	uart_callback_set(dev_uart, uart_async_callback, NULL);
+	uart_rx_enable(dev_uart, uart_double_buffer[0], UART_BUF_SIZE, UART_RX_TIMEOUT_MS);
 }
 
 void main(void)
 {
-	const struct device *dev;
-	bool led_is_on = true;
-	int ret;
-
-	dev = device_get_binding(LED0);
-	if (dev == NULL) {
-		return;
-	}
-
-	ret = gpio_pin_configure(dev, PIN, GPIO_OUTPUT_ACTIVE | FLAGS);
-	if (ret < 0) {
-		return;
-	}
-
+	printk("UART Async example started\n");
+	
 	uart_init();
 
 	while (1) {
-		gpio_pin_set(dev, PIN, (int)led_is_on);
-		led_is_on = !led_is_on;
-		k_msleep(SLEEP_TIME_MS);
+		// When the RX RDY semaphore is given, print out the received UART data
+		if(k_sem_take(&rx_rdy, K_MSEC(50)) == 0)
+		{
+			static uint8_t string_buffer[UART_BUF_SIZE + 1];
+			memcpy(string_buffer, read_ptr, read_len);
+			string_buffer[read_len] = 0;
+			printk("RX %i: %s\n", read_len, string_buffer);
+		}
 	}
 }
