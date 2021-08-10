@@ -9,10 +9,18 @@
 #include <devicetree.h>
 #include <drivers/gpio.h>
 #include <drivers/uart.h>
+#ifdef DPPI_PRESENT
+#include <nrfx_dppi.h>
+#else
+#include <nrfx_ppi.h>
+#endif
+#include <helpers/nrfx_gppi.h>
 #include <string.h>
 
 #define UART_BUF_SIZE		16
-#define UART_RX_TIMEOUT_MS	100
+#define UART_RX_TIMEOUT_MS	1000
+
+#define COUNT_RX_TIMER		NRF_TIMER1
 
 K_SEM_DEFINE(tx_done, 0, 1);
 K_SEM_DEFINE(rx_rdy, 0, 1);
@@ -24,6 +32,37 @@ uint8_t uart_double_buffer[2][UART_BUF_SIZE];
 uint8_t *uart_buf_next = uart_double_buffer[1];
 uint8_t *read_ptr;
 uint32_t read_len;
+
+#ifdef DPPI_PRESENT
+typedef uint8_t ppi_channel_t;
+#else
+typedef nrf_ppi_channel_t ppi_channel_t;
+#endif
+
+static ppi_channel_t ppi_ch_count_rx_received;
+
+static void timer_init(void)
+{
+	COUNT_RX_TIMER->MODE = TIMER_MODE_MODE_Counter << TIMER_MODE_MODE_Pos;
+	COUNT_RX_TIMER->TASKS_START = 1;
+}
+
+static uint32_t timer_get_count_and_reset(void)
+{
+	COUNT_RX_TIMER->TASKS_CAPTURE[0] = 1;
+	COUNT_RX_TIMER->TASKS_CLEAR = 1;
+	return COUNT_RX_TIMER->CC[0];
+}
+
+static void ppi_init(void)
+{
+	// Assign a PPI channel to increment the timer each time a byte is received over the UART
+	if(nrfx_ppi_channel_alloc(&ppi_ch_count_rx_received) == NRFX_ERROR_NO_MEM);
+	nrfx_ppi_channel_assign(ppi_ch_count_rx_received, 
+							(uint32_t)&NRF_UARTE0->EVENTS_RXDRDY,
+							(uint32_t)&COUNT_RX_TIMER->TASKS_COUNT);
+	nrfx_ppi_channel_enable(ppi_ch_count_rx_received);
+}
 
 void uart_async_callback(const struct device *uart_dev,
 				struct uart_event *evt, void *user_data)
@@ -72,6 +111,10 @@ void main(void)
 {
 	printk("UART Async example started\n");
 	
+	timer_init();
+
+	ppi_init();
+
 	uart_init();
 
 	while (1) {
@@ -83,5 +126,8 @@ void main(void)
 			string_buffer[read_len] = 0;
 			printk("RX %i: %s\n", read_len, string_buffer);
 		}
+		printk("RX bytes counted: %i\n", timer_get_count_and_reset());
+		k_sleep(K_MSEC(500));
+
 	}
 }
