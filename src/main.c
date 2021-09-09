@@ -11,7 +11,7 @@
 #include <drivers/uart.h>
 #include <string.h>
 
-#define UART_BUF_SIZE		16
+#define UART_BUF_SIZE		32
 #define UART_RX_TIMEOUT_MS	100
 
 K_SEM_DEFINE(tx_done, 0, 1);
@@ -48,6 +48,7 @@ void uart_async_callback(const struct device *uart_dev,
 			break;
 
 		case UART_RX_DISABLED:
+			printk("DIS!\n");
 			k_sem_give(&rx_disabled);
 			break;
 		
@@ -58,7 +59,7 @@ void uart_async_callback(const struct device *uart_dev,
 
 static void uart_init(void)
 {
-	dev_uart = device_get_binding("UART_0");
+	dev_uart = device_get_binding("UART_1");
 	if (dev_uart == NULL) {
 		printk("Failed to get UART binding\n");
 		return;
@@ -66,6 +67,27 @@ static void uart_init(void)
 
 	uart_callback_set(dev_uart, uart_async_callback, NULL);
 	uart_rx_enable(dev_uart, uart_double_buffer[0], UART_BUF_SIZE, UART_RX_TIMEOUT_MS);
+}
+
+#define TEST_BYTES 100
+static void uart_send_tx_packet(void)
+{
+	static uint8_t send_buf[TEST_BYTES];
+	for(int i = 0; i < TEST_BYTES; i++){
+		int char_index = i % 50;
+		if(char_index < 20) send_buf[i] = 'A' + (char)(char_index - 0);
+		else if(char_index < 40) send_buf[i] = 'a' + (char)(char_index - 20);
+		else if(char_index < 50) send_buf[i] = '0' + (char)(char_index - 40);
+	}
+	uart_tx(dev_uart, send_buf, TEST_BYTES, 500);
+}
+
+void uart_tx_send(void)
+{
+	while(1){
+		k_msleep(2000);
+		uart_send_tx_packet();
+	}
 }
 
 void main(void)
@@ -85,3 +107,5 @@ void main(void)
 		}
 	}
 }
+
+K_THREAD_DEFINE(uart_tx_thread, 1024, uart_tx_send, NULL, NULL, NULL, 7, 0, 0);
