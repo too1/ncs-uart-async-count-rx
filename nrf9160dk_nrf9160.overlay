@@ -8,9 +8,9 @@
 	compatible = "nordic,nrf-uarte";
 	current-speed=<230400>;
 	status="ok";
-	tx-pin = <33>;
-	rx-pin = <34>;
-	rts-pin = <35>;
-	cts-pin = <36>;
+	tx-pin = <21>;
+	rx-pin = <22>;
+	rts-pin = <23>;
+	cts-pin = <24>;
 	hw-flow-control;
 };

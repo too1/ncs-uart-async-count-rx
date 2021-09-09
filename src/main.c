@@ -11,7 +11,7 @@
 #include <drivers/uart.h>
 #include <string.h>
 
-#define UART_BUF_SIZE		32
+#define UART_BUF_SIZE		200
 #define UART_RX_TIMEOUT_MS	100
 
 K_SEM_DEFINE(tx_done, 0, 1);
@@ -57,6 +57,12 @@ void uart_async_callback(const struct device *uart_dev,
 	}
 }
 
+static void app_uart_rx_enable(void)
+{
+	uart_rx_enable(dev_uart, uart_buf_next, UART_BUF_SIZE, UART_RX_TIMEOUT_MS);
+	uart_buf_next = ((uart_buf_next == uart_double_buffer[1]) ? uart_double_buffer[0] : uart_double_buffer[1]);
+}
+
 static void uart_init(void)
 {
 	dev_uart = device_get_binding("UART_1");
@@ -66,10 +72,10 @@ static void uart_init(void)
 	}
 
 	uart_callback_set(dev_uart, uart_async_callback, NULL);
-	uart_rx_enable(dev_uart, uart_double_buffer[0], UART_BUF_SIZE, UART_RX_TIMEOUT_MS);
+	app_uart_rx_enable();
 }
 
-#define TEST_BYTES 100
+#define TEST_BYTES 400
 static void uart_send_tx_packet(void)
 {
 	static uint8_t send_buf[TEST_BYTES];
@@ -98,12 +104,15 @@ void main(void)
 
 	while (1) {
 		// When the RX RDY semaphore is given, print out the received UART data
-		if(k_sem_take(&rx_rdy, K_MSEC(50)) == 0)
-		{
+		if(k_sem_take(&rx_rdy, K_MSEC(50)) == 0) {
 			static uint8_t string_buffer[UART_BUF_SIZE + 1];
 			memcpy(string_buffer, read_ptr, read_len);
 			string_buffer[read_len] = 0;
 			printk("RX %i: %s\n", read_len, string_buffer);
+		}
+		if(k_sem_take(&rx_disabled, K_NO_WAIT) == 0) {
+			printk("REEnabling...");
+			app_uart_rx_enable();
 		}
 	}
 }
