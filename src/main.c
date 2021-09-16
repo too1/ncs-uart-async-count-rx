@@ -15,28 +15,38 @@
 #define UART_RX_TIMEOUT_MS	100
 
 K_SEM_DEFINE(tx_done, 0, 1);
-K_SEM_DEFINE(rx_rdy, 0, 1);
 K_SEM_DEFINE(rx_disabled, 0, 1);
+
+#define UART_RX_MSG_QUEUE_SIZE	8
+struct uart_rx_msg_queue {
+	uint8_t bytes[UART_BUF_SIZE];
+	uint32_t length;
+};
+
+char __aligned(4) uart_rx_msgq_buffer[UART_RX_MSG_QUEUE_SIZE * sizeof(struct uart_rx_msg_queue)];
+struct k_msgq uart_rx_msgq;
 
 static const struct device *dev_uart;
 
 uint8_t uart_double_buffer[2][UART_BUF_SIZE];
 uint8_t *uart_buf_next = uart_double_buffer[1];
-uint8_t *read_ptr;
-uint32_t read_len;
 
 void uart_async_callback(const struct device *uart_dev,
 				struct uart_event *evt, void *user_data)
 {
+	static struct uart_rx_msg_queue new_message;
+
 	switch (evt->type) {
 		case UART_TX_DONE:
 			k_sem_give(&tx_done);
 			break;
 		
 		case UART_RX_RDY:
-			read_ptr = evt->data.rx.buf + evt->data.rx.offset;
-			read_len = evt->data.rx.len;
-			k_sem_give(&rx_rdy);
+			memcpy(new_message.bytes, evt->data.rx.buf + evt->data.rx.offset, evt->data.rx.len);
+			new_message.length = evt->data.rx.len;
+			if(k_msgq_put(&uart_rx_msgq, &new_message, K_NO_WAIT) != 0){
+				printk("Error: Uart RX message queue full!\n");
+			}
 			break;
 		
 		case UART_RX_BUF_REQUEST:
@@ -74,14 +84,18 @@ void main(void)
 	
 	uart_init();
 
+	k_msgq_init(&uart_rx_msgq, uart_rx_msgq_buffer, sizeof(struct uart_rx_msg_queue), UART_RX_MSG_QUEUE_SIZE);
+
+	struct uart_rx_msg_queue incoming_message;
+
 	while (1) {
-		// When the RX RDY semaphore is given, print out the received UART data
-		if(k_sem_take(&rx_rdy, K_MSEC(50)) == 0)
-		{
-			static uint8_t string_buffer[UART_BUF_SIZE + 1];
-			memcpy(string_buffer, read_ptr, read_len);
-			string_buffer[read_len] = 0;
-			printk("RX %i: %s\n", read_len, string_buffer);
-		}
+		// This function will not return until a new message is ready
+		k_msgq_get(&uart_rx_msgq, &incoming_message, K_FOREVER);
+
+		// Process the message here.
+		static uint8_t string_buffer[UART_BUF_SIZE + 1];
+		memcpy(string_buffer, incoming_message.bytes, incoming_message.length);
+		string_buffer[incoming_message.length] = 0;
+		printk("RX %i: %s\n", incoming_message.length, string_buffer);
 	}
 }
