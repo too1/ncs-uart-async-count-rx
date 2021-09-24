@@ -12,9 +12,10 @@
 #include <string.h>
 
 #define UART_BUF_SIZE		16
+#define UART_TX_TIMEOUT_MS	100
 #define UART_RX_TIMEOUT_MS	100
 
-K_SEM_DEFINE(tx_done, 0, 1);
+K_SEM_DEFINE(tx_done, 1, 1);
 K_SEM_DEFINE(rx_disabled, 0, 1);
 
 #define UART_RX_MSG_QUEUE_SIZE	8
@@ -78,11 +79,21 @@ static void uart_init(void)
 	uart_rx_enable(dev_uart, uart_double_buffer[0], UART_BUF_SIZE, UART_RX_TIMEOUT_MS);
 }
 
+static int uart_send(const uint8_t * data_ptr, uint32_t data_len)
+{
+	int err = k_sem_take(&tx_done, K_MSEC(UART_TX_TIMEOUT_MS));
+	if(err != 0) return err;
+	return uart_tx(dev_uart, data_ptr, data_len, UART_TX_TIMEOUT_MS);
+}
+
 void main(void)
 {
 	printk("UART Async example started\n");
 	
 	uart_init();
+
+	uint8_t test_string[] = "Hello world through the UART async driver\r\n";
+	uart_send(test_string, strlen(test_string));
 
 	k_msgq_init(&uart_rx_msgq, uart_rx_msgq_buffer, sizeof(struct uart_rx_msg_queue), UART_RX_MSG_QUEUE_SIZE);
 
