@@ -7,6 +7,7 @@
 #include <zephyr.h>
 #include <device.h>
 #include <devicetree.h>
+#include <sys/ring_buffer.h>
 #include <drivers/gpio.h>
 #include <drivers/uart.h>
 #include <string.h>
@@ -19,23 +20,24 @@ K_SEM_DEFINE(tx_done, 1, 1);
 K_SEM_DEFINE(rx_disabled, 0, 1);
 
 #define UART_RX_MSG_QUEUE_SIZE	8
-struct uart_rx_msg_queue {
+struct uart_msg_queue_item {
 	uint8_t bytes[UART_BUF_SIZE];
 	uint32_t length;
 };
 
-char __aligned(4) uart_rx_msgq_buffer[UART_RX_MSG_QUEUE_SIZE * sizeof(struct uart_rx_msg_queue)];
-struct k_msgq uart_rx_msgq;
-
-static const struct device *dev_uart;
-
+// UART RX primary buffers
 uint8_t uart_double_buffer[2][UART_BUF_SIZE];
 uint8_t *uart_buf_next = uart_double_buffer[1];
+
+// UART RX message queue
+K_MSGQ_DEFINE(uart_rx_msgq, sizeof(struct uart_msg_queue_item), UART_RX_MSG_QUEUE_SIZE, 4);
+
+static const struct device *dev_uart;
 
 void uart_async_callback(const struct device *uart_dev,
 				struct uart_event *evt, void *user_data)
 {
-	static struct uart_rx_msg_queue new_message;
+	static struct uart_msg_queue_item new_message;
 
 	switch (evt->type) {
 		case UART_TX_DONE:
@@ -95,9 +97,7 @@ void main(void)
 	uint8_t test_string[] = "Hello world through the UART async driver\r\n";
 	uart_send(test_string, strlen(test_string));
 
-	k_msgq_init(&uart_rx_msgq, uart_rx_msgq_buffer, sizeof(struct uart_rx_msg_queue), UART_RX_MSG_QUEUE_SIZE);
-
-	struct uart_rx_msg_queue incoming_message;
+	struct uart_msg_queue_item incoming_message;
 
 	while (1) {
 		// This function will not return until a new message is ready
