@@ -19,11 +19,16 @@
 K_SEM_DEFINE(tx_done, 1, 1);
 K_SEM_DEFINE(rx_disabled, 0, 1);
 
+#define UART_TX_BUF_SIZE  		256
 #define UART_RX_MSG_QUEUE_SIZE	8
 struct uart_msg_queue_item {
 	uint8_t bytes[UART_BUF_SIZE];
 	uint32_t length;
 };
+
+// UART TX fifo
+RING_BUF_DECLARE(app_tx_fifo, UART_TX_BUF_SIZE);
+volatile int bytes_claimed;
 
 // UART RX primary buffers
 uint8_t uart_double_buffer[2][UART_BUF_SIZE];
@@ -34,6 +39,19 @@ K_MSGQ_DEFINE(uart_rx_msgq, sizeof(struct uart_msg_queue_item), UART_RX_MSG_QUEU
 
 static const struct device *dev_uart;
 
+static int uart_tx_get_from_queue(void)
+{
+	uint8_t *data_ptr;
+	// Try to claim any available bytes in the FIFO
+	bytes_claimed = ring_buf_get_claim(&app_tx_fifo, &data_ptr, UART_TX_BUF_SIZE);
+
+	if(bytes_claimed > 0) {
+		// Start a UART transmission based on the number of available bytes
+		uart_tx(dev_uart, data_ptr, bytes_claimed, SYS_FOREVER_MS);
+	}
+	return bytes_claimed;
+}
+
 void app_uart_async_callback(const struct device *uart_dev,
 							 struct uart_event *evt, void *user_data)
 {
@@ -41,7 +59,14 @@ void app_uart_async_callback(const struct device *uart_dev,
 
 	switch (evt->type) {
 		case UART_TX_DONE:
-			k_sem_give(&tx_done);
+			// Free up the written bytes in the TX FIFO
+			ring_buf_get_finish(&app_tx_fifo, bytes_claimed);
+
+			// If there is more data in the TX fifo, start the transmission
+			if(uart_tx_get_from_queue() == 0) {
+				// Or release the semaphore if the TX fifo is empty
+				k_sem_give(&tx_done);
+			}
 			break;
 		
 		case UART_RX_RDY:
@@ -81,11 +106,29 @@ static void app_uart_init(void)
 	uart_rx_enable(dev_uart, uart_double_buffer[0], UART_BUF_SIZE, UART_RX_TIMEOUT_MS);
 }
 
+// Function to send UART data, by writing it to a ring buffer (FIFO) in the application
+// WARNING: This function is not thread safe! If you want to call this function from multiple threads a semaphore should be used
 static int app_uart_send(const uint8_t * data_ptr, uint32_t data_len)
 {
-	int err = k_sem_take(&tx_done, K_MSEC(UART_TX_TIMEOUT_MS));
-	if(err != 0) return err;
-	return uart_tx(dev_uart, data_ptr, data_len, UART_TX_TIMEOUT_MS);
+	while(1) {
+		// Try to move the data into the TX ring buffer
+		uint32_t written_to_buf = ring_buf_put(&app_tx_fifo, data_ptr, data_len);
+		data_len -= written_to_buf;
+		
+		// In case all the data was written, exit the loop
+		if(data_len == 0) break;
+
+		// In case some data is still to be written, sleep for some time and run the loop one more time
+		k_msleep(10);
+		data_ptr += written_to_buf;
+	}
+
+	// In case the UART TX is idle, start transmission
+	if(k_sem_take(&tx_done, K_NO_WAIT) == 0) {
+		uart_tx_get_from_queue();
+	}
+
+	return 0;
 }
 
 void main(void)
@@ -94,7 +137,7 @@ void main(void)
 	
 	app_uart_init();
 
-	uint8_t test_string[] = "Hello world through the UART async driver\r\n";
+	const uint8_t test_string[] = "Hello world through the UART async driver\r\n";
 	app_uart_send(test_string, strlen(test_string));
 
 	struct uart_msg_queue_item incoming_message;
