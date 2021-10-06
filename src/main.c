@@ -34,8 +34,8 @@ K_MSGQ_DEFINE(uart_rx_msgq, sizeof(struct uart_msg_queue_item), UART_RX_MSG_QUEU
 
 static const struct device *dev_uart;
 
-void uart_async_callback(const struct device *uart_dev,
-				struct uart_event *evt, void *user_data)
+void app_uart_async_callback(const struct device *uart_dev,
+							 struct uart_event *evt, void *user_data)
 {
 	static struct uart_msg_queue_item new_message;
 
@@ -69,7 +69,7 @@ void uart_async_callback(const struct device *uart_dev,
 	}
 }
 
-static void uart_init(void)
+static void app_uart_init(void)
 {
 	dev_uart = device_get_binding("UART_0");
 	if (dev_uart == NULL) {
@@ -77,11 +77,11 @@ static void uart_init(void)
 		return;
 	}
 
-	uart_callback_set(dev_uart, uart_async_callback, NULL);
+	uart_callback_set(dev_uart, app_uart_async_callback, NULL);
 	uart_rx_enable(dev_uart, uart_double_buffer[0], UART_BUF_SIZE, UART_RX_TIMEOUT_MS);
 }
 
-static int uart_send(const uint8_t * data_ptr, uint32_t data_len)
+static int app_uart_send(const uint8_t * data_ptr, uint32_t data_len)
 {
 	int err = k_sem_take(&tx_done, K_MSEC(UART_TX_TIMEOUT_MS));
 	if(err != 0) return err;
@@ -92,10 +92,10 @@ void main(void)
 {
 	printk("UART Async example started\n");
 	
-	uart_init();
+	app_uart_init();
 
 	uint8_t test_string[] = "Hello world through the UART async driver\r\n";
-	uart_send(test_string, strlen(test_string));
+	app_uart_send(test_string, strlen(test_string));
 
 	struct uart_msg_queue_item incoming_message;
 
