@@ -115,17 +115,17 @@ static int app_uart_send(const uint8_t * data_ptr, uint32_t data_len)
 		uint32_t written_to_buf = ring_buf_put(&app_tx_fifo, data_ptr, data_len);
 		data_len -= written_to_buf;
 		
+		// In case the UART TX is idle, start transmission
+		if(k_sem_take(&tx_done, K_NO_WAIT) == 0) {
+			uart_tx_get_from_queue();
+		}	
+		
 		// In case all the data was written, exit the loop
 		if(data_len == 0) break;
 
 		// In case some data is still to be written, sleep for some time and run the loop one more time
 		k_msleep(10);
 		data_ptr += written_to_buf;
-	}
-
-	// In case the UART TX is idle, start transmission
-	if(k_sem_take(&tx_done, K_NO_WAIT) == 0) {
-		uart_tx_get_from_queue();
 	}
 
 	return 0;
