@@ -1,0 +1,21 @@
+// To get started, press Ctrl+Space to bring up the completion menu and view the available nodes.
+// For more help, browse the DeviceTree documentation at https://docs.zephyrproject.org/latest/guides/dts/index.html
+/* Disable UART1, because it is used by default in TF-M */
+&uart1 {
+	compatible = "nordic,nrf-uarte";
+	current-speed=<230400>;
+	status="ok";
+	tx-pin = <17>;
+	rx-pin = <20>;
+	rts-pin = <15>;
+	cts-pin = <22>;
+	hw-flow-control;
+};
+
+&nrf_interface_pins_0_2_routing {
+	status = "okay";
+};
+
+&nrf_interface_pins_3_5_routing {
+	status = "okay";
+};

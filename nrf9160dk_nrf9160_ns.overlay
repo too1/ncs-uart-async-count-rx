@@ -1,0 +1,13 @@
+// To get started, press Ctrl+Space to bring up the completion menu and view the available nodes.
+// For more help, browse the DeviceTree documentation at https://docs.zephyrproject.org/latest/guides/dts/index.html
+
+&uart1 {
+	compatible = "nordic,nrf-uarte";
+	current-speed=<230400>;
+	status="ok";
+	tx-pin = <18>;
+	rx-pin = <17>;
+	rts-pin = <21>;
+	cts-pin = <19>;
+	hw-flow-control;
+};

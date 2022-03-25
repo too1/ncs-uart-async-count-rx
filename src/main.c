@@ -96,7 +96,7 @@ void app_uart_async_callback(const struct device *uart_dev,
 
 static void app_uart_init(void)
 {
-	dev_uart = device_get_binding("UART_0");
+	dev_uart = device_get_binding("UART_1");
 	if (dev_uart == NULL) {
 		printk("Failed to get UART binding\n");
 		return;
@@ -142,14 +142,20 @@ void main(void)
 
 	struct uart_msg_queue_item incoming_message;
 
+	int counter = 0;
+
 	while (1) {
 		// This function will not return until a new message is ready
-		k_msgq_get(&uart_rx_msgq, &incoming_message, K_FOREVER);
-
-		// Process the message here.
-		static uint8_t string_buffer[UART_BUF_SIZE + 1];
-		memcpy(string_buffer, incoming_message.bytes, incoming_message.length);
-		string_buffer[incoming_message.length] = 0;
-		printk("RX %i: %s\n", incoming_message.length, string_buffer);
+		if (k_msgq_get(&uart_rx_msgq, &incoming_message, K_MSEC(50)) == 0) {
+			// Process the message here.
+			static uint8_t string_buffer[UART_BUF_SIZE + 1];
+			memcpy(string_buffer, incoming_message.bytes, incoming_message.length);
+			string_buffer[incoming_message.length] = 0;
+			printk("RX %i: %s\n", incoming_message.length, string_buffer);
+		}
+		if(counter++ > 40) {
+			counter = 0;
+			app_uart_send("Test", 4);
+		}
 	}
 }
